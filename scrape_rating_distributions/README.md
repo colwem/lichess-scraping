@@ -13,3 +13,5 @@ To run locally
 export GOOGLE_APPLICATION_CREDENTIALS='<path-to-creds-file>'
 python main.py
 ```
+
+Guy with rating stats @robinson_dudeski
