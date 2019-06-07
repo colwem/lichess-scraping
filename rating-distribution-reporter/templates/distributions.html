@@ -1,0 +1,80 @@
+{% extends "layout.html" %}
+
+{% block title %}Distributions{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static',
+filename='css/distributions-chart.css') | autoversion}}">
+{% endblock %}
+
+{% block content %}
+<h1>Lichess rating distribution charts</h1>
+<select id="perf-type">
+  {% for perf_type in perf_types %}
+  <option value="{{perf_type}}"
+    {% if perf_type == 'blitz' %}selected='true'{% endif %}>
+    {{perf_type | snake_to_title}}
+  </option>
+  {% endfor %}
+</select>
+<div id="svg"></div>
+<div id="slider"></div>
+<p id="value-time"></p>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://d3js.org/d3.v5.min.js"></script>
+<script src="https://unpkg.com/d3-simple-slider"></script>
+<script src="{{ url_for('static', filename='js/distributions-chart.js') | autoversion }}"></script>
+<script>
+  let perf_type = d3.select('#perf-type').property('value')
+  let container = d3.select("div.container")
+
+  let gSlider = d3.select('#slider')
+    .append('svg')
+    .attr('width', 1000)
+    .attr('height', 100)
+    .append('g')
+    .attr('transform', 'translate(30,30)')
+
+
+  let apiUrl = '/api/distributions/'
+  d3.json(apiUrl + perf_type).then((dataset) => {
+    distribution = dataset[0].distribution
+    distributionsChart.initialize(distribution, container)
+
+    let dateParser = d3.timeParse('%d%m%y%H');
+    times = dataset.map(d => d.date).map(dateParser)
+
+    let slider = d3
+      .sliderBottom()
+      .width(distributionsChart.width - 60)
+      .min(d3.min(times))
+      .max(d3.max(times))
+      .tickValues(times)
+      .on('onchange', val => {
+        let i = d3.bisect(times, val)
+        if(i === dataset.length) {
+          i -= 1;
+        }
+        distribution = dataset[i].distribution;
+        distributionsChart.update(distribution);
+      });
+
+    gSlider.call(slider)
+
+  });
+
+  d3.select('#perf-type')
+  .on('change', function() {
+    let perf_type = d3.select(this).property('value')
+    d3.json(apiUrl + perf_type).then((dataset) => {
+      distributionsChart.updateDataset(dataset);
+    });
+  });
+
+
+
+
+</script>
+{% endblock %}

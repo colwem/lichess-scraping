@@ -1,0 +1,9 @@
+.line {
+  fill: none;
+  stroke-width: 3;
+  stroke: steelblue;
+}
+
+.area {
+  fill: lightsteelblue;
+}
