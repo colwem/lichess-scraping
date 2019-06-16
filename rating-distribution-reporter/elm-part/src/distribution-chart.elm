@@ -45,8 +45,8 @@ import Svg.Styled.Attributes as SvgCss
 
 chartDimensions : { width : Float, height : Float }
 chartDimensions =
-  { width = 800
-  , height = 300}
+  { width = 1000
+  , height = 600}
 
 margins : { top : Float, bottom : Float, right : Float, left : Float }
 margins =
@@ -126,7 +126,7 @@ type alias CumulativeModel = List Float
 getCumulativeModel : Distribution -> CumulativeModel
 getCumulativeModel =
   List.drop 1
-    << List.scanl (\a b -> a + b) 0
+    << List.scanl (+) 0
 
 -- update
 
@@ -141,8 +141,8 @@ testUpdate msg model =
   case msg of
     MouseMove point ->
       let
-          x = Tuple.first point
-          y = Tuple.second point
+          x = pointX point
+          y = pointY point
       in
           ( model
           , Browser.Dom.getElement "overlay"
@@ -346,9 +346,9 @@ viewMouseOverlay : Svg Msg
 viewMouseOverlay =
   rect
     [ id "overlay"
-    , height <| Px chartDimensions.height
-    , width <| Px chartDimensions.width
-    , fillOpacity <| Opacity 0
+    , height ( Px chartDimensions.height )
+    , width ( Px chartDimensions.width )
+    , fillOpacity  ( Opacity 0 )
     , onMouseMove MouseMove
     , TypedSvg.Events.onMouseOver MouseEnter
     , TypedSvg.Events.onMouseLeave MouseLeave
@@ -361,23 +361,25 @@ viewMouseLines point =
       y = Tuple.second point
 
       commonAttr =
-        [ strokeDasharray "3,3"
-        , stroke <| fadeOut 0.3 Color.black]
+        [ strokeDasharray "4,4"
+        , stroke (fadeOut 0.5 Color.black)
+        , strokeWidth 3
+        ]
 
       xline =
         TypedSvg.line
-          ([ x1 <| Px  x
-          , x2 <| Px  x
-          , y1 <| Px 0
-          , y2 <| Px chartDimensions.height
+          ([ x1 ( Px x )
+          , x2 ( Px x )
+          , y1 ( Px 0 )
+          , y2 ( Px chartDimensions.height )
           ] ++ commonAttr) []
 
       yline =
         TypedSvg.line
-          ([ x1 <| Px 0
-          , x2 <| Px chartDimensions.width
-          , y1 <| Px y
-          , y2 <| Px y
+          ([ x1 ( Px 0 )
+          , x2 ( Px chartDimensions.width )
+          , y1 ( Px y )
+          , y2 ( Px y )
           ] ++ commonAttr) []
   in
       [ xline
@@ -433,8 +435,8 @@ sizeAttributes =
       svgWidth =
         margins.right + margins.left + chartDimensions.width
   in
-      [ height <| Px svgHeight
-      , width <| Px svgWidth
+      [ height ( Px svgHeight )
+      , width ( Px svgWidth )
       , viewBox 0 0 svgWidth svgHeight
       ]
 

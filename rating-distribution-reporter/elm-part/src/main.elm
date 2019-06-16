@@ -1,39 +1,73 @@
 import Http
 import Time
 import Json.Decode as D
+import UserRatingHistory
 
 
 type alias Model =
-  { username : Username
-  , dataset : Maybe DataSet
-  , date : Time.Posix
-  , distribution : Distribution
-  , perfType : String
-  , mousePosition : MousePosition
+  { usernameInput : String
+  , username : Maybe Username
+  , userRatingHistory : Loaded UserRatingHistory
+  , fetchingUserRatingHistory : Bool
+  , percentiles : Loaded Percentiles
+  , distributions : Loaded (List DatedDistribution)
+  , dateSelected : Time.Posix
+  , perfTypeSelected : PerfType
+  , globalMousePosition : MousePosition
+  , distributionChartModel : DistributionChartModel
+  , percentilesChartModel : PercentilesChartModel
   }
+
+type Loaded a
+  = Loading
+  | Success a
+  | Failure LoadingProblem
+
+type Username = Username String
+
+
+type Percentiles
+  = Percentiles (list Percentile)
+
+type Percentile
+  = Percentile
+    { percentile : Float
+    , data : {date: Time.Posix, rating : Float}
+    }
+
+type alias DatedDistribution =
+  { date : Time.Posix
+  , distribution : Distribution
+  }
+
+type Distribution
+  = Distribution (List Int)
+
+type LoadingProblem
+  = String
 
 type MousePosition
   = UnknownMousePosition
-  | MousePosition
-    { x : Float
-    , y : Float
+  | MousePosition Point
+
+type alias Point =
+  { x : Float
+  , y : Float
+  }
+
+type DistributionChartModel
+  = DistributionChartModel
+    { distribution : Distribution
+    , relativeMousePosition : MousePosition
+    , userRating : Rating
     }
 
-type DataSet
-  = Failure
-  | Success DataModel
-
-type alias Username = Maybe String
-
-type alias DataModel =
-  List DatedDistribution
-
-type alias DatedDistribution =
-  { date: Time.Posix
-  , distribution: Distribution}
-
-type alias Distribution =
-  List Int
+type PercentilesChartModel
+  = PercentilesChartModel
+    { percentiles : Percentiles
+    , relativeMousePosition : MousePosition
+    , userRatingHistory : UserRatingHistory
+    }
 
 dataModelDecoder : Decoder DataModel
 dataModelDecoder =
