@@ -20,9 +20,12 @@
             "elm-community/typed-svg": "5.0.1",
             "folkertdev/one-true-path-experiment": "4.0.2",
             "gampleman/elm-visualization": "2.0.0",
+            "ggb/numeral-elm": "1.4.3",
             "justinmimbs/time-extra": "1.1.0",
+            "krisajenkins/remotedata": "6.0.1",
             "noahzgordon/elm-color-extra": "1.0.2",
-            "rtfeldman/elm-css": "16.0.1"
+            "rtfeldman/elm-css": "16.0.1",
+            "ryannhg/date-format": "2.3.0"
         },
         "indirect": {
             "Skinney/murmur3": "2.0.8",
@@ -38,8 +41,7 @@
             "ianmackenzie/elm-interval": "1.0.1",
             "ianmackenzie/elm-triangular-mesh": "1.0.2",
             "justinmimbs/date": "3.1.2",
-            "rtfeldman/elm-hex": "1.0.0",
-            "ryannhg/date-format": "2.3.0"
+            "rtfeldman/elm-hex": "1.0.0"
         }
     },
     "test-dependencies": {

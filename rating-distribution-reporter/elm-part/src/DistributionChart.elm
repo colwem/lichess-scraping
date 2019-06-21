@@ -1,3 +1,5 @@
+module DistributionChart exposing (view, Model)
+
 -- elm/core
 import Browser
 import Browser.Dom
@@ -42,15 +44,24 @@ import Html.Styled
 import Css.Global as Css
 import Svg.Styled.Attributes as SvgCss
 
+-- Other
+import Numeral
+
+-- My
+import Utilities exposing (loggingDecoder, maybeShow)
+import MousePosition
+import Distributions exposing (Distribution)
+import Point exposing (Point)
+import Chart exposing (horizontalLineAttributes, verticalLineAttributes)
 
 chartDimensions : { width : Float, height : Float }
 chartDimensions =
-  { width = 1000
-  , height = 600}
+  { width = 900
+  , height = 300}
 
 margins : { top : Float, bottom : Float, right : Float, left : Float }
 margins =
-  { top = 50
+  { top = 5
   , bottom = 50
   , right = 50
   , left = 50
@@ -66,54 +77,27 @@ numPlayersLineColor = Color.rgb255 127 158 195
 
 -- Mouse stuff
 
-type alias Point =
-    ( Float, Float )
-
-pointX = Tuple.first
-pointY = Tuple.second
-
-pointDiff: Point -> Point -> Point
-pointDiff a b =
-  ((pointX a) - (pointX b), (pointY a) - (pointY b))
-
-loggingDecoder : Decoder a -> Decoder a
-loggingDecoder realDecoder =
-    Decode.value
-        |> Decode.andThen
-            (\value ->
-                case Decode.decodeValue realDecoder value of
-                    Ok decoded ->
-                        Decode.succeed decoded
-
-                    Err error ->
-                        Decode.fail <| Debug.log "decode error" <| Decode.errorToString error
-            )
-
-mousePositionDecoder : Decoder Point
-mousePositionDecoder =
-  Decode.map2 Tuple.pair
-    (Decode.field "clientX" Decode.float)
-    (Decode.field "clientY" Decode.float)
 
 onMouseMove : (Point -> a) -> Attribute a
 onMouseMove msgConstructor =
   TypedSvg.Events.on "mousemove"
     <| VirtualDom.Normal
-    <| Decode.map msgConstructor mousePositionDecoder
+    <| Decode.map msgConstructor MousePosition.decoder
 
 -- Model
 
-type alias Distribution = List Float
 type alias Model =
   { distribution : Distribution
-  , mouseShow : Bool
+  , userRating : Maybe Float
   , mousePosition : Maybe Point
+  , mouseShow : Bool
   }
 
 testModel : Model
 testModel =
   { mousePosition = Nothing
   , mouseShow = False
+  , userRating = Nothing
   , distribution = [2701,1653,1877,2102,2567,2918,3324,3813,4156,4554,4760,5109,5278,5654,5749
     ,6098,6347,6349,6265,6232,6503,6562,6582,6290,6610,6604,6408,6322,6669,6488
     ,6348,6002,6095,5750,5540,5065,5442,4869,4723,4341,4599,4006,3667,3271,3447
@@ -133,22 +117,24 @@ getCumulativeModel =
 type Msg
   = MouseMove Point
   | MouseRelative (Result Browser.Dom.Error Point)
-  | MouseLeave
-  | MouseEnter
+  | ShowMouse
+  | HideMouse
+
+
+
 
 testUpdate : Msg -> Model -> (Model, Cmd Msg)
 testUpdate msg model =
   case msg of
     MouseMove point ->
-      let
-          x = pointX point
-          y = pointY point
-      in
-          ( model
-          , Browser.Dom.getElement "overlay"
-            |> Task.map (\e -> (x - e.element.x , y - e.element.y) )
-            |> Task.attempt MouseRelative
+      ( model
+      , Browser.Dom.getElement "overlay"
+        |> Task.map
+          (\e ->
+            Point (point.x - e.element.x) (point.y - e.element.y)
           )
+        |> Task.attempt MouseRelative
+      )
 
     MouseRelative result ->
       case result of
@@ -160,12 +146,12 @@ testUpdate msg model =
         Err (Browser.Dom.NotFound error) ->
           (Debug.log error { model | mousePosition = Nothing }, Cmd.none)
 
-    MouseLeave ->
+    HideMouse ->
       ({ model | mouseShow = False }
       , Cmd.none
       )
 
-    MouseEnter ->
+    ShowMouse ->
       ({ model | mouseShow = True }
       , Cmd.none
       )
@@ -230,6 +216,7 @@ area xScale yScale model =
         |> List.map pairToAreaCoords
         |> Shape.area curve
 
+line : ContinuousScale Float -> ContinuousScale Float -> List Float -> Path
 line xScale yScale model =
   let
       lineData (x, y) =
@@ -247,32 +234,26 @@ viewRatingAxis scale =
 
 viewNumPlayersAxis : ContinuousScale Float -> Svg msg
 viewNumPlayersAxis scale =
-  let
-      formatter n =
-        String.fromInt (round ( n / 1000 ) ) ++ "k"
-  in
-      g [ transform [Translate 0 0]]
-        [ Axis.left
-            [ Axis.tickCount 6
-            , Axis.tickFormat formatter
-            , Axis.tickSizeInner 0
-            , Axis.tickSizeOuter 0
-            , Axis.tickPadding 10
-            ]
-            scale
+  g [ transform [Translate 0 0]]
+    [ Axis.left
+        [ Axis.tickCount 6
+        , Axis.tickFormat (Numeral.format "0a")
+        , Axis.tickSizeInner 0
+        , Axis.tickSizeOuter 0
+        , Axis.tickPadding 10
         ]
+        scale
+    ]
 
 viewCumulativeAxis : Svg msg
 viewCumulativeAxis =
   let
-      percentFormatter n =
-        String.fromInt ( round ( n * 100 ) ) ++ "%"
       scale = Scale.linear (chartDimensions.height, 0) (0, 1)
   in
       g [ transform [Translate chartDimensions.width 0]]
         [ Axis.right
             [ Axis.tickCount 4
-            , Axis.tickFormat percentFormatter
+            , Axis.tickFormat (Numeral.format "0%")
             , Axis.tickSizeInner 0
             , Axis.tickSizeOuter 0
             , Axis.tickPadding 10
@@ -284,7 +265,7 @@ viewCumulativeAxis =
 
 viewYGrid : ContinuousScale Float -> Svg msg
 viewYGrid scale =
-  g [ transform [Translate 0 0]]
+  g [ class ["grid"], transform [Translate 0 0]]
     [ Axis.left
       [ Axis.tickCount 6
       , Axis.tickFormat <| always ""
@@ -296,7 +277,7 @@ viewYGrid scale =
 
 viewXGrid : ContinuousScale Float -> Svg msg
 viewXGrid scale =
-  g [ transform [Translate 0 (chartDimensions.height)]]
+  g [ class ["grid"], transform [Translate 0 (chartDimensions.height)]]
     [ Axis.bottom
         [ Axis.tickCount 20
         , Axis.tickFormat <| always ""
@@ -322,7 +303,7 @@ viewNumPlayersLine xScale yScale model =
     ]
 
 viewCumulativeLine : ContinuousScale Float -> ContinuousScale Float ->
- Distribution -> Svg msg
+ CumulativeModel -> Svg msg
 viewCumulativeLine xScale yScale model =
   Path.element (line xScale yScale model)
     [ stroke cumulativeLineColor
@@ -342,61 +323,64 @@ viewNumPlayersArea xScale yScale model =
 
 -- Mouse tracking lines
 
-viewMouseOverlay : Svg Msg
-viewMouseOverlay =
+-- onMouseMove MouseMove add this to subscriptions
+
+viewMouseOverlay : msg -> msg -> Svg msg
+viewMouseOverlay showMouse hideMouse =
   rect
-    [ id "overlay"
+    [ id "distribution-chart"
     , height ( Px chartDimensions.height )
     , width ( Px chartDimensions.width )
     , fillOpacity  ( Opacity 0 )
-    , onMouseMove MouseMove
-    , TypedSvg.Events.onMouseOver MouseEnter
-    , TypedSvg.Events.onMouseLeave MouseLeave
+    , TypedSvg.Events.onMouseOver showMouse
+    , TypedSvg.Events.onMouseLeave hideMouse
     ] []
 
-viewMouseLines : Point -> List (Svg Msg)
+viewMouseLines : Point -> List (Svg msg)
 viewMouseLines point =
   let
-      x = Tuple.first point
-      y = Tuple.second point
-
       commonAttr =
         [ strokeDasharray "4,4"
-        , stroke (fadeOut 0.5 Color.black)
+        , stroke (fadeOut 0.8 Color.black)
         , strokeWidth 3
         ]
 
       xline =
         TypedSvg.line
-          ([ x1 ( Px x )
-          , x2 ( Px x )
-          , y1 ( Px 0 )
-          , y2 ( Px chartDimensions.height )
-          ] ++ commonAttr) []
+          ( verticalLineAttributes point.x (0, chartDimensions.height)
+          ++ commonAttr
+          ) []
 
       yline =
         TypedSvg.line
-          ([ x1 ( Px 0 )
-          , x2 ( Px chartDimensions.width )
-          , y1 ( Px y )
-          , y2 ( Px y )
-          ] ++ commonAttr) []
+          (horizontalLineAttributes point.y (0, chartDimensions.width)
+           ++ commonAttr) []
   in
       [ xline
       , yline ]
+
+viewUserRatingLine : Float -> Svg msg
+viewUserRatingLine rating =
+  TypedSvg.line
+    ( verticalLineAttributes
+      (Scale.convert ratingScale rating)
+      (0, chartDimensions.height)
+    ++ [ class ["line", "user-rating-line"] ]
+    )
+    []
 
 -- View
 
 pointToString : Point -> String
 pointToString point =
   let
-      x = Tuple.first point |> String.fromFloat
-      y = Tuple.second point |> String.fromFloat
+      x = String.fromFloat point.x
+      y = String.fromFloat point.y
   in
       "(" ++ x ++ ", " ++ y ++ ")"
 
-view : Model -> Html Msg
-view model =
+view : Model -> msg -> msg -> Html msg
+view model showMouse hideMouse =
   let
       xScale = getXScale model.distribution
       yScale = getYScale model.distribution
@@ -404,26 +388,26 @@ view model =
       cumulativeScale = getCumulativeScale cumulativeModel
       mouseLines =
         if model.mouseShow then
-          case model.mousePosition of
-            Nothing ->
-              []
-              -- [text_ [] [text "Nothing"]]
-            Just point ->
-              -- [text_ [] [text (pointToString point)]] ++
-              viewMouseLines point
+          (maybeShow (viewMouseLines) model.mousePosition)
+          |> List.head
+          |> Maybe.withDefault []
         else []
   in
-      createGChart <|
-        [ viewRatingAxis ratingScale
-        , viewNumPlayersAxis yScale
-        , viewCumulativeAxis
-        , viewXGrid ratingScale
-        , viewYGrid yScale
-        , viewNumPlayersArea xScale yScale model.distribution
-        , viewNumPlayersLine xScale yScale model.distribution
-        , viewCumulativeLine xScale cumulativeScale cumulativeModel]
-        ++ mouseLines
-        ++ [viewMouseOverlay]
+      svg
+        sizeAttributes
+        [ createGChart <|
+          mouseLines ++
+          [ viewRatingAxis ratingScale
+          , viewNumPlayersAxis yScale
+          , viewCumulativeAxis
+          , viewXGrid ratingScale
+          , viewYGrid yScale
+          , viewNumPlayersArea xScale yScale model.distribution
+          , viewNumPlayersLine xScale yScale model.distribution
+          , viewCumulativeLine xScale cumulativeScale cumulativeModel]
+          ++ maybeShow (viewUserRatingLine) model.userRating
+          ++ [viewMouseOverlay showMouse hideMouse]
+        ]
 
 
 sizeAttributes : List (Attribute msg)
@@ -445,9 +429,9 @@ testView : Model -> Html Msg
 testView model =
   svg
     sizeAttributes
-    [view model]
+    [view model ShowMouse HideMouse]
 
-subscriptions : Model -> Sub Msg
+subscriptions : Model -> Sub msg
 subscriptions model =
   Sub.none
 

@@ -2,5 +2,10 @@ env/
 *.pyc
 __pycache__
 elm-stuff/
+dist/
+node_modules/
+.cache/
+*/firestore.py
+creds.json
 
 

@@ -46,12 +46,14 @@ def percentiles(perf_type):
     lines = []
     for percentile in percentiles:
         lines.append({
-            'percentile': percentile,
-            'line': [{
-                'date': d.get('date').strftime(date_format),
+            'percentile': float(percentile),
+            'datedRatings': [{
+                'date': round(d.get('date').timestamp() * 1000),
                 'rating': d.get('percentiles')[percentile] }
                 for d in docs] })
-    return jsonify(lines)
+    response = jsonify(lines)
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response
 
 
 @app.route('/api/distributions/<perf_type>')
@@ -60,10 +62,12 @@ def distributions_api(perf_type):
         abort(404)
     distributions = db.collection(u'distributions')
     docs = list(distributions.where('perf_type', '==', perf_type).stream())
-    return jsonify([{
+    response =  jsonify([{
         'distribution': d.get('distribution'),
-        'date': d.get('date').strftime(date_format)}
+        'date': round(d.get('date').timestamp() * 1000)}
         for d in docs])
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response
 
 @app.route("/api/download")
 def download_all():

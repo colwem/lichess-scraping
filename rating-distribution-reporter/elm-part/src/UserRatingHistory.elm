@@ -1,24 +1,35 @@
-module UserRatingHistory exposing (UserRatingHistory)
+module UserRatingHistory exposing (UserRatingHistory, fetch, userRatings,
+  userRating)
 
 import Http
 import Html exposing (div)
 import Json.Decode as Decode exposing (Decoder)
+import List
+import List.Extra
 import Time exposing (Month(..))
 import Time.Extra
+import RemoteData exposing (WebData)
+import Utilities exposing (getClosest)
+import PerfType exposing (PerfType(..))
 
+type Username =
+  Username String
 
-fetch : String -> (Result Http.Error UserRatingHistory -> msg)-> Cmd msg
+type Msg =
+  UserRatingHistoryRecieved Username (Result Http.Error UserRatingHistory)
+
+fetch : String -> (String -> WebData UserRatingHistory -> msg)-> Cmd msg
 fetch username msgCons =
   Http.get
     { url = "https://lichess.org/api/user/" ++ username ++ "/rating-history"
-    , expect = Http.expectJson msgCons decoder
+    , expect = Http.expectJson (msgCons username << RemoteData.fromResult) decoder
     }
 
 type UserRatingHistory =
   UserRatingHistory (List PerfTypeRatingHistory)
 
 type alias PerfTypeRatingHistory =
-  { perfType : String
+  { perfType : PerfType
   , points : List DatedRating
   }
 
@@ -27,6 +38,25 @@ type alias DatedRating =
   , rating : Float
   }
 
+userRatings : UserRatingHistory -> PerfType -> List DatedRating
+userRatings (UserRatingHistory perfTypeRatingHistories) perfType =
+  List.Extra.find
+    (.perfType >> (==) perfType)
+    perfTypeRatingHistories
+    |> Maybe.withDefault {perfType = Blitz, points = []}
+    |> .points
+
+userRating : UserRatingHistory -> PerfType -> Time.Posix -> Float
+userRating userRatingHistory perfType date =
+  getClosest
+    (.date >> Time.posixToMillis)
+    (Time.posixToMillis date)
+    (userRatings userRatingHistory perfType)
+    |> Maybe.withDefault { date = Time.millisToPosix 0, rating = 1500 }
+    |> .rating
+
+
+
 decoder : Decoder UserRatingHistory
 decoder  =
   Decode.map UserRatingHistory (Decode.list perfTypeRatingHistoryDecoder)
@@ -34,7 +64,7 @@ decoder  =
 perfTypeRatingHistoryDecoder : Decoder PerfTypeRatingHistory
 perfTypeRatingHistoryDecoder =
   Decode.map2 PerfTypeRatingHistory
-    ( Decode.field "name" Decode.string)
+    ( Decode.field "name" PerfType.decodeDisplay)
     ( Decode.field "points" (Decode.list datedRatingDecoder ))
 
 datedRatingDecoder : Decoder DatedRating
@@ -79,7 +109,7 @@ toMonth month =
 
 main =
   let
-      happy = Decode.decodeString decoder testString
+      happy = Debug.log "ok" <| Decode.decodeString decoder testString
   in
       div [] []
 

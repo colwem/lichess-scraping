@@ -1,201 +1,439 @@
-import Http
-import Time
-import Json.Decode as D
-import UserRatingHistory
+module Main exposing (main)
 
+import Browser
+import Browser.Events
+import Browser.Dom
+import Task
+
+import Http
+import Html exposing (..)
+import Html.Attributes as Attributes exposing (..)
+import Html.Events as Events exposing (onSubmit)
+
+import TypedSvg exposing (svg)
+import TypedSvg.Attributes
+import TypedSvg.Types exposing (Length(..))
+
+import Time
+import Json.Decode as Decode
+import RemoteData exposing (WebData, RemoteData(..))
+
+-- My
+import UserRatingHistory exposing (UserRatingHistory, fetch, userRatings,
+  userRating)
+import Percentiles exposing (Percentiles)
+import Distributions exposing (DatedDistribution)
+import DistributionChart
+import PercentilesChart
+import Utilities exposing (maybeShow)
+import Point exposing (Point)
+import MousePosition
+import PerfType exposing (PerfType)
 
 type alias Model =
   { usernameInput : String
-  , username : Maybe Username
-  , userRatingHistory : Loaded UserRatingHistory
-  , fetchingUserRatingHistory : Bool
-  , percentiles : Loaded Percentiles
-  , distributions : Loaded (List DatedDistribution)
-  , dateSelected : Time.Posix
+  , username : Maybe String
+  , userRatingHistory : WebData UserRatingHistory
+  , percentiles : WebData Percentiles
+  , distributions : WebData (List DatedDistribution)
+  , dateSelected : Maybe Time.Posix
+  , selectingDate : Bool
   , perfTypeSelected : PerfType
-  , globalMousePosition : MousePosition
-  , distributionChartModel : DistributionChartModel
-  , percentilesChartModel : PercentilesChartModel
+  , mousePosition : Maybe Point
+  , showDistributionMouse : Bool
+  , showPercentilesMouse : Bool
+  , percentilesMouseRelative : Maybe Point
+  , distributionMouseRelative : Maybe Point
   }
-
-type Loaded a
-  = Loading
-  | Success a
-  | Failure LoadingProblem
 
 type Username = Username String
 
 
-type Percentiles
-  = Percentiles (list Percentile)
-
-type Percentile
-  = Percentile
-    { percentile : Float
-    , data : {date: Time.Posix, rating : Float}
-    }
-
-type alias DatedDistribution =
-  { date : Time.Posix
-  , distribution : Distribution
-  }
-
-type Distribution
-  = Distribution (List Int)
-
-type LoadingProblem
-  = String
-
-type MousePosition
-  = UnknownMousePosition
-  | MousePosition Point
-
-type alias Point =
-  { x : Float
-  , y : Float
-  }
-
-type DistributionChartModel
-  = DistributionChartModel
-    { distribution : Distribution
-    , relativeMousePosition : MousePosition
-    , userRating : Rating
-    }
-
-type PercentilesChartModel
-  = PercentilesChartModel
-    { percentiles : Percentiles
-    , relativeMousePosition : MousePosition
-    , userRatingHistory : UserRatingHistory
-    }
-
-dataModelDecoder : Decoder DataModel
-dataModelDecoder =
-  D.list datedDistributionDecoder
-
-datedDistributionDecoder : Decoder DatedDistribution
-datedDistributionDecoder =
-  D.map2 DatedDistribution
-    ( D.field "date" ( D.map Time.millisToPosix D.int ) )
-    ( D.field "distribution" distributionDecoder )
-
-distributionDecoder : Decoder Distribution
-distributionDecoder =
-  D.list D.int
 
 
 init : () -> (Model, Cmd Msg)
 init _ =
   let
-      perfType = "Blitz"
+      initialPerfType = PerfType.Blitz
   in
-  ( {username = Nothing
-    , dataset = Nothing
-    , distribution = Nothing
-    , perType = "Blitz"
-    , mousePosition = UnknownMousePosition
-    }
-  , getDataset perfType)
+      ( { usernameInput = ""
+        , username = Nothing
+        , userRatingHistory = NotAsked
+        , percentiles = Loading
+        , distributions = Loading
+        , dateSelected = Nothing
+        , selectingDate = False
+        , perfTypeSelected = initialPerfType
+        , mousePosition = Nothing
+        , showDistributionMouse = False
+        , showPercentilesMouse = False
+        , percentilesMouseRelative = Nothing
+        , distributionMouseRelative = Nothing
+        }
+      , Cmd.batch
+          [ Percentiles.fetch initialPerfType PercentilesResponse
+          , Distributions.fetch initialPerfType DistributionsResponse
+          ]
+      )
 
 type Msg
-  = ChangeDataset String
-  | MouseMove MousePosition
-  | GotDataset (Result Http.Error Dataset)
+  = UsernameInput String
+  | FetchUserRatingHistory
+  | UserRatingHistoryResponse String (WebData UserRatingHistory)
+  | DistributionsResponse (WebData (List DatedDistribution))
+  | PercentilesResponse (WebData Percentiles)
+  | MouseMove Point
+  | DateSelected Time.Posix
+  | StartSelectingDate
+  | StopSelectingDate
+  | PerfTypeSelected PerfType
+  | ShowPercentilesMouse
+  | HidePercentilesMouse
+  | ShowDistributionMouse
+  | HideDistributionMouse
+  | PercentilesMouseRelative (Result Browser.Dom.Error Point)
+  | DistributionMouseRelative (Result Browser.Dom.Error Point)
+
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
   case msg of
-    ChangeDataset perfType ->
-      ({ model | perfType = perfType }
-      , Http.get
-          { url = api.distributions ++ perfType
-          , expect = Http.expectJson GotDataset dataModelDecoder
-          })
+    UsernameInput usernameInput ->
+      ( { model | usernameInput = usernameInput }
+      , Cmd.none
+      )
 
-    MouseMove mousePosition ->
-      { model | mousePosition = mousePosition }
+    FetchUserRatingHistory ->
+      if usernameInputValid model then
+        ( { model | userRatingHistory = Loading }
+        , UserRatingHistory.fetch model.usernameInput UserRatingHistoryResponse
+        )
+      else
+        ( model, Cmd.none )
 
-    GotDataset result ->
+
+    UserRatingHistoryResponse username response ->
+      ( { model | userRatingHistory = response, username = Just username }
+      , Cmd.none
+      )
+
+    PerfTypeSelected perfType ->
+      ( { model | perfTypeSelected = perfType }
+      , Cmd.batch
+        [ Percentiles.fetch perfType PercentilesResponse
+        , Distributions.fetch perfType DistributionsResponse
+        ]
+      )
+
+    PercentilesResponse response ->
+      ( { model | percentiles = response }
+      , Cmd.none
+      )
+
+    DistributionsResponse response ->
+      ( { model | distributions = response }
+      , Cmd.none
+      )
+
+    MouseMove point ->
+      ( { model | mousePosition = Just point }
+      , Cmd.batch
+        [ mouseRelative "distribution-chart" point DistributionMouseRelative
+        , mouseRelative "percentiles-chart" point PercentilesMouseRelative
+        ]
+      )
+
+    DateSelected date ->
+      ( { model | dateSelected = Just date }
+      , Cmd.none
+      )
+
+    StartSelectingDate ->
+      ( { model | selectingDate = True
+        , dateSelected = updateDateSelected { model | selectingDate = True }
+        }
+      , Cmd.none
+      )
+
+    StopSelectingDate ->
+      ( { model | selectingDate = False }
+      , Cmd.none
+      )
+
+    ShowPercentilesMouse ->
+      ( { model | showPercentilesMouse = True }
+      , Cmd.none
+      )
+
+    HidePercentilesMouse ->
+      ( { model | showPercentilesMouse = False }
+      , Cmd.none
+      )
+
+    ShowDistributionMouse ->
+      ( { model | showDistributionMouse = True }
+      , Cmd.none
+      )
+
+    HideDistributionMouse ->
+      ( { model | showDistributionMouse = False }
+      , Cmd.none
+      )
+
+    PercentilesMouseRelative result ->
       case result of
-        Err _ ->
-          { model | dataset = Failure }
+        Ok point ->
+          ( { model | percentilesMouseRelative = Just point
+            , dateSelected =
+                updateDateSelected
+                  { model | percentilesMouseRelative = Just point }
+            }
+          , Cmd.none
+          )
 
-        Ok dataModel ->
-          let
-              date = getValidDate model.date dataset
-              distribution = getDistribution model.date dataset
-          in
-              { model | dataset = Success dataset
-              , distribution = distribution,
-              , date = date
-              }
+        _ -> ( model, Cmd.none )
 
+    DistributionMouseRelative result ->
+      case result of
+        Ok point ->
+          ( { model | distributionMouseRelative = Just point }
+          , Cmd.none
+          )
 
-getDistribution : DataModel -> Time.Posix -> Distribution
-getDistribution dataModel date =
-  let
-      defaultDistribution = [0]
-  in
-  List.find (\x -> x.date == date) dataModel
-    |> Maybe.withDefault defaultDistribution
+        Err _ -> ( model, Cmd.none )
 
-getValidDate : Time.Posix -> DataModel -> Time.Posix
-getValidDate date dataModel =
-  let
-      dataModelToDateList dm =
-        List.map ( \x -> x.date ) dm
-  in
-      getClosest identity model.date (dataModelToDateList dataModel)
+updateDateSelected : Model -> Maybe Time.Posix
+updateDateSelected model =
+  case (model.percentiles, model.selectingDate, model.percentilesMouseRelative) of
+    (Success percentiles, True, Just point) ->
+      Just (PercentilesChart.xToDate percentiles point.x)
 
-view = Model -> Html Msg
-view model =
-  div []
-    [ H.h1 [] [ text "Distributions" ]
-    , viewPerfTypeSelector model.perfType model.perfTypes
-    , dateSelector (availableDates model.dataset) model.date
-    , viewChart model.distribution model.mousePosition
-    ]
+    _ ->
+      model.dateSelected
 
-viewPerfTypeSelector : List String -> Html Msg
-viewPerfTypeSelector perfType perfTypes =
-  H.select []
-  [ List.map ( viewPerfTypeOption perfType ) perfTypes]
-
-viewPerfTypeOption : String -> String -> Html Msg
-viewPerfTypeOption current perfType =
-  let
-      attributes =
-        if current == perfType
-        then [ A.selected ]
-        else []
-  in
-      H.option attributes [ text perfType ]
-
-getClosest : ( a -> comparable ) -> comparable -> List a -> Maybe a
-getClosest accessor target list =
-  List.minimumBy (\x -> accessor x - target |> abs) list
-
--- getClosest accessor target list =
+-- getDistribution : DataModel -> Time.Posix -> Distribution
+-- getDistribution dataModel date =
   -- let
-      -- distance a b = abs ( a - b )
-
-      -- next current x =
-        -- let
-            -- d = accessor x |> distance target
-        -- in
-            -- if  d < Tuple.first current
-            -- then (d, x)
-            -- else current
-
-      -- first = head list
-      -- start = (distance first target, first)
+      -- defaultDistribution = [0]
   -- in
-      -- case list of
-        -- [] ->
-          -- Nothing
+  -- List.find (\x -> x.date == date) dataModel
+    -- |> Maybe.withDefault defaultDistribution
 
-        -- x :: [] ->
-          -- Just x
+-- getValidDate : Time.Posix -> DataModel -> Time.Posix
+-- getValidDate date dataModel =
+  -- let
+      -- dataModelToDateList dm =
+        -- List.map ( \x -> x.date ) dm
+  -- in
+      -- getClosest identity model.date (dataModelToDateList dataModel)
 
-        -- _ ->
-          -- Just (foldl next first list |> Tuple.second)
+mouseRelative :
+        String -> Point -> (Result Browser.Dom.Error Point -> msg)
+        -> Cmd msg
+mouseRelative elementId mousePosition msg =
+  Browser.Dom.getElement elementId
+    |> Task.map
+      (\e ->
+        Point
+          ( mousePosition.x - e.element.x )
+          ( mousePosition.y - ( e.element.y - e.viewport.y))
+      )
+    |> Task.attempt msg
+
+relativePosition : Maybe Point -> Maybe Point -> Maybe Point
+relativePosition a b =
+  case (a, b) of
+    (Just pointA, Just pointB) ->
+      Just <| Point.diff pointA pointB
+
+    _ -> Nothing
+
+sizeAttributes : List (Attribute msg)
+sizeAttributes =
+  [ TypedSvg.Attributes.height ( Px 500 )
+  , TypedSvg.Attributes.width ( Px 500  )
+  , TypedSvg.Attributes.viewBox 0 0 500 500
+  ]
+
+view : Model -> Html Msg
+view model =
+  let
+      userRating =
+        case (model.userRatingHistory, model.dateSelected) of
+          (Success userRatingHistory, Just dateSelected)->
+            Just <|
+              (UserRatingHistory.userRating
+                userRatingHistory
+                model.perfTypeSelected
+                dateSelected)
+
+          _ -> Nothing
+
+      userRatings =
+        case model.userRatingHistory of
+          Success userRatingHistory ->
+            Just <|
+              UserRatingHistory.userRatings
+                userRatingHistory
+                model.perfTypeSelected
+
+          _ -> Nothing
+
+      distributionChart =
+        case (model.distributions, model.dateSelected) of
+          (Success distributions, Just dateSelected) ->
+            DistributionChart.view
+              ( DistributionChart.Model
+                  (Distributions.closestDistribution dateSelected distributions)
+                  userRating
+                  model.distributionMouseRelative
+                  model.showDistributionMouse
+              )
+              ShowDistributionMouse
+              HideDistributionMouse
+
+          (Loading, _ ) ->
+            text "Loading Distributions..."
+
+          (Success distributions, Nothing ) ->
+            text "Select a date to view it's distribution"
+
+          _ -> text "???"
+
+      percentilesChart =
+        case model.percentiles of
+          Success percentiles ->
+            PercentilesChart.view
+              ( PercentilesChart.Model
+                  percentiles
+                  userRatings
+                  model.percentilesMouseRelative
+                  model.showPercentilesMouse
+                  model.dateSelected
+              )
+              StartSelectingDate
+              StopSelectingDate
+              ShowPercentilesMouse
+              HidePercentilesMouse
+
+          Loading -> text "Loading Percentiles..."
+
+          _ -> text "???"
+
+
+  in
+      div []
+        [ div [ class "text-center" ]
+          [ h1 []
+            [ text "Lichess "
+            , div [ class "d-inline-block" ]
+              [ viewPerfTypeSelector model.perfTypeSelected]
+            , text " Historical Rating Statistics"
+            ]
+          ]
+        , Html.div [][ percentilesChart ]
+        , Html.div [][ distributionChart ]
+        , viewUserForm model
+        ]
+
+usernameInputValid : Model -> Bool
+usernameInputValid model =
+  case model.username of
+    Just username ->
+      not (model.usernameInput == "" || model.usernameInput == username)
+
+    Nothing ->
+      not (model.usernameInput == "")
+
+viewUserForm : Model -> Html Msg
+viewUserForm model =
+  let
+      disabled =
+        if usernameInputValid model
+        then ""
+        else "disabled"
+  in
+      div []
+        [ Html.form [ onSubmit FetchUserRatingHistory ]
+          [ div [class "input-group mb-3"]
+            [ div [class "input-group-prepend"]
+              [ button
+                [ class <| "btn btn-primary mb-2 " ++ disabled  ]
+                [ text "Fetch User Rating History" ]
+              ]
+            , (viewUserInput model.usernameInput)
+            ]
+          ]
+        , viewUsername model
+        ]
+
+viewUserInput : String -> Html Msg
+viewUserInput usernameInput =
+  input
+    [ placeholder "Lichess Username"
+    , value usernameInput
+    , class "form-control mb-2 mr-sm-2"
+    , Events.onInput UsernameInput
+    ]
+    []
+
+viewUsername : Model -> Html Msg
+viewUsername model =
+  case (model.username, model.userRatingHistory) of
+    (Just username, Failure failure) ->
+      div [ class "alert alert-danger" ]
+        [ text
+          ("Rating History for \""
+            ++ username ++ "\" could not be found")
+        ]
+
+    (Just username, Success ratingHistory) ->
+      div [ class "alert alert-primary" ]
+        [ text
+          ("Showing User Rating History for \""
+            ++ username ++ "\"")
+        ]
+
+    _ -> text ""
+
+onPerfTypeChange : (PerfType -> msg) -> Attribute msg
+onPerfTypeChange handler =
+  Events.on "change"
+    <| Decode.map handler
+    <| Decode.map PerfType.fromString
+    <| Decode.at ["target", "value"] Decode.string
+
+viewPerfTypeSelector : PerfType -> Html Msg
+viewPerfTypeSelector perfType =
+  Html.select
+    [ onPerfTypeChange PerfTypeSelected ] <|
+    List.map ( viewPerfTypeOption perfType ) PerfType.perfTypes
+
+viewPerfTypeOption : PerfType -> PerfType -> Html Msg
+viewPerfTypeOption current perfType =
+  Html.option
+    [ Attributes.selected (current == perfType)
+    , value (PerfType.toString perfType)]
+    [ text (PerfType.toDisplay perfType) ]
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+  Sub.batch
+  [ Browser.Events.onMouseMove (Decode.map MouseMove MousePosition.decoder)
+  , Browser.Events.onMouseUp (Decode.succeed StopSelectingDate)
+  ]
+
+-- Sub.batch
+  -- [ Sub.map (PercentilesChartMsg) PercentilesChart.subscriptions
+  -- , Sub.map (DistributionChartMsg) DistributionChart.subscriptions
+  -- ]
+
+
+main =
+  Browser.element
+    { init = init
+    , update = update
+    , view = view
+    , subscriptions = subscriptions
+    }
