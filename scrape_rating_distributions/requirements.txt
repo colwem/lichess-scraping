@@ -23,7 +23,7 @@ msgpack==0.6.1
 protobuf==3.8.0
 pyasn1==0.4.5
 pyasn1-modules==0.2.5
-Pygments==2.3.1
+Pygments==2.7.4
 pynvim==0.3.2
 python-chess==0.25.1
 pytz==2019.1
