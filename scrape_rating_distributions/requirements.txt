@@ -28,7 +28,7 @@ pynvim==0.3.2
 python-chess==0.25.1
 pytz==2019.1
 requests==2.22.0
-rsa==4.0
+rsa==4.7
 six==1.12.0
 soupsieve==1.9.1
 uritemplate==3.0.0
